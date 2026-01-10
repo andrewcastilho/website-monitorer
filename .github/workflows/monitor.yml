@@ -1,4 +1,4 @@
-name: Website Monitor
+name: S44 Gate Monitor
 
 on:
   schedule:
@@ -8,6 +8,7 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -15,9 +16,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - run: pip install requests
+      - name: Install dependencies
+        run: |
+          pip install playwright requests
+          playwright install chromium
 
-      - run: python monitor.py
+      - name: Run monitor
+        run: python monitor.py
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
