@@ -2,52 +2,75 @@ from playwright.sync_api import sync_playwright
 import json
 import os
 import requests
+import re
 
-URL = "https://sitedetailsreport.sfwmd.gov/#/sites/S44"
-STATE_FILE = "last_value.json"
+# 🔧 STRUCTURES TO MONITOR
+STRUCTURES = {
+    "S44": "https://sitedetailsreport.sfwmd.gov/#/sites/S44",
+    "S41": "https://sitedetailsreport.sfwmd.gov/#/sites/S41",
+    "S155": "https://sitedetailsreport.sfwmd.gov/#/sites/S155",
+    "S40": "https://sitedetailsreport.sfwmd.gov/#/sites/S40",
+  
+}
 
-def get_gate_value():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(URL, timeout=60000)
+STATE_FILE = "last_values.json"
 
-        # Wait for the table value to load
-        page.wait_for_timeout(8000)
-
-        text = page.content()
-        browser.close()
-
-    # Look for gate opening value in page text
-    import re
-    match = re.search(r"Gate Opening.*?([0-9]+\.[0-9]+)", text, re.S)
-    if not match:
-        raise Exception("Gate Opening value not found")
-
-    return float(match.group(1))
-
-def load_last():
+def load_state():
     if not os.path.exists(STATE_FILE):
-        return 0.0
-    return json.load(open(STATE_FILE))["value"]
+        return {}
+    return json.load(open(STATE_FILE))
 
-def save_last(value):
-    json.dump({"value": value}, open(STATE_FILE, "w"))
+def save_state(state):
+    json.dump(state, open(STATE_FILE, "w"))
 
-def notify(value):
+def notify(structure, value):
     requests.post(
         "https://api.pushover.net/1/messages.json",
         data={
             "token": os.environ["PUSHOVER_TOKEN"],
             "user": os.environ["PUSHOVER_USER"],
-            "message": f"S44 Gate OPENING ALERT 🚨\nGate Opening: {value} ft"
+            "message": f"🚨 {structure} GATE OPEN\nGate Opening: {value} ft"
         }
     )
 
-current = get_gate_value()
-last = load_last()
+def get_gate_value(page, url):
+    page.goto(url, timeout=60000)
+    page.wait_for_timeout(8000)
 
-if current > 0.0 and last == 0.0:
-    notify(current)
+    text = page.content()
+    match = re.search(r"Gate Opening.*?([0-9]+\.[0-9]+)", text, re.S)
 
-save_last(current)
+    if not match:
+        raise Exception("Gate Opening value not found")
+
+    return float(match.group(1))
+
+def main():
+    state = load_state()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+
+        for structure, url in STRUCTURES.items():
+            try:
+                current = get_gate_value(page, url)
+                last = state.get(structure, 0.0)
+
+                print(f"{structure}: {current} ft (last: {last})")
+
+                # Notify only when opening transitions from 0 → >0
+                if current > 0.0 and last == 0.0:
+                    notify(structure, current)
+
+                state[structure] = current
+
+            except Exception as e:
+                print(f"Error checking {structure}: {e}")
+
+        browser.close()
+
+    save_state(state)
+
+if __name__ == "__main__":
+    main()
