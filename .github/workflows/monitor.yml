@@ -1,30 +1,38 @@
-name: Run monitor
+name: Spillway Monitor
 
 on:
   schedule:
     - cron: '*/10 * * * *'  # every 10 minutes
-  workflow_dispatch:        # allows manual runs
+  workflow_dispatch:        # allows manual run
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout your repository
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      # 2️⃣ Show repo structure (debugging)
+      - name: List repo files
+        run: ls -R
+
+      # 3️⃣ Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # 4️⃣ Install dependencies
       - name: Install dependencies
         run: |
           pip install playwright requests
           playwright install
 
+      # 5️⃣ Run your monitor script
       - name: Run monitor
         run: python monitor.py
-  env:
-    PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
-    PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
