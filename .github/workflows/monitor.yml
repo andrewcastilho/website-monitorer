@@ -1,4 +1,4 @@
-name: Spillway Monitor
+name: Run monitor
 
 on:
   schedule:
@@ -24,7 +24,7 @@ jobs:
           playwright install
 
       - name: Run monitor
-        run: python spillway_monitor.py
-        env:
-          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
-          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+        run: python monitor.py
+  env:
+    PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+    PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
