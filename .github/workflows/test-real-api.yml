@@ -1,0 +1,171 @@
+name: Test Real API
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install requests
+        run: pip install requests
+      
+      - name: Test the real API endpoint
+        run: |
+          cat > test_api.py << 'EOF'
+          import requests
+          import json
+          
+          print("Testing the REAL SFWMD API endpoint...")
+          print("=" * 60)
+          
+          # The correct API URL from your cURL command
+          url = "https://sitestatus.api.sfwmd.gov/v1/sitestatus/realtime"
+          
+          # Headers from your cURL command
+          headers = {
+              'accept': 'application/json, text/plain, */*',
+              'accept-language': 'en-US,en;q=0.9',
+              'origin': 'https://sitedetailsreport.sfwmd.gov',
+              'priority': 'u=1, i',
+              'referer': 'https://sitedetailsreport.sfwmd.gov/',
+              'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+              'sec-ch-ua-mobile': '?0',
+              'sec-ch-ua-platform': '"Windows"',
+              'sec-fetch-dest': 'empty',
+              'sec-fetch-mode': 'cors',
+              'sec-fetch-site': 'same-site',
+              'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          }
+          
+          structures = ["S40", "S44", "S41", "S155"]
+          results = {}
+          
+          for structure in structures:
+              print(f"\\nTesting {structure}...")
+              print("-" * 40)
+              
+              params = {
+                  "format": "json",
+                  "sites": structure,
+                  "status": "A"
+              }
+              
+              try:
+                  response = requests.get(url, params=params, headers=headers, timeout=15)
+                  
+                  print(f"Status: {response.status_code}")
+                  print(f"URL: {response.url}")
+                  
+                  if response.status_code == 200:
+                      try:
+                          data = response.json()
+                          print("✓ Success! Got JSON response")
+                          
+                          # Save the raw response
+                          filename = f"api_response_{structure}.json"
+                          with open(filename, "w") as f:
+                              json.dump(data, f, indent=2)
+                          print(f"Saved to {filename}")
+                          
+                          # Look for flow data
+                          flow_value = None
+                          if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
+                              for time_series in data["timeSeriesResponse"]["timeSeries"]:
+                                  if ("parameter" in time_series and 
+                                      "parameterName" in time_series["parameter"] and
+                                      time_series["parameter"]["parameterName"] == "FLOW"):
+                                      
+                                      if "values" in time_series and len(time_series["values"]) > 0:
+                                          latest_value = time_series["values"][0]
+                                          if "value" in latest_value:
+                                              flow_value = latest_value["value"]
+                                              
+                                              # Check if valid (not noDataValue)
+                                              no_data_value = time_series["parameter"].get("noDataValue", -99999.0)
+                                              if flow_value != no_data_value:
+                                                  flow_value = float(flow_value)
+                                                  break
+                          
+                          if flow_value is not None:
+                              print(f"✓ Flow value: {flow_value} cfs")
+                              results[structure] = {
+                                  "status": "success",
+                                  "flow_cfs": flow_value
+                              }
+                          else:
+                              print("✗ No flow data found in response")
+                              results[structure] = {
+                                  "status": "no_flow_data",
+                                  "data_structure": str(type(data))
+                              }
+                              
+                      except json.JSONDecodeError as e:
+                          print(f"✗ JSON decode error: {e}")
+                          print(f"Response preview: {response.text[:200]}")
+                          
+                          # Save error response
+                          filename = f"error_{structure}.txt"
+                          with open(filename, "w") as f:
+                              f.write(response.text)
+                          print(f"Saved error to {filename}")
+                          
+                          results[structure] = {
+                              "status": "json_error",
+                              "error": str(e)
+                          }
+                  else:
+                      print(f"✗ HTTP error: {response.status_code}")
+                      print(f"Error: {response.text[:200]}")
+                      results[structure] = {
+                          "status": f"http_error_{response.status_code}",
+                          "error": response.text[:200]
+                      }
+                      
+              except requests.exceptions.Timeout:
+                  print("✗ Request timed out")
+                  results[structure] = {"status": "timeout"}
+              except Exception as e:
+                  print(f"✗ Exception: {e}")
+                  results[structure] = {"status": "exception", "error": str(e)}
+          
+          # Summary
+          print(f"\\n{'='*60}")
+          print("TEST SUMMARY:")
+          print('='*60)
+          
+          success_count = sum(1 for r in results.values() if r.get("status") == "success")
+          print(f"Successful: {success_count}/{len(structures)}")
+          
+          for structure in structures:
+              result = results.get(structure, {})
+              status = result.get("status", "unknown")
+              if status == "success":
+                  print(f"  {structure}: ✓ {result.get('flow_cfs')} cfs")
+              else:
+                  print(f"  {structure}: ✗ {status}")
+          
+          # Save summary
+          with open("test_summary.json", "w") as f:
+              json.dump(results, f, indent=2)
+          
+          print("\\nTest complete!")
+          EOF
+          
+          python test_api.py
+      
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-test-results
+          path: |
+            api_response_*.json
+            error_*.txt
+            test_summary.json
+          retention-days: 7
