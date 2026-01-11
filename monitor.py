@@ -38,16 +38,25 @@ def notify(structure, value, change=None):
 
 def get_flow_value(page, url):
     page.goto(url, timeout=60000)
-    page.wait_for_timeout(8000)  # wait for dynamic content
 
-    text = page.content()
+    # Wait for the flow number to appear
+    # Replace the CSS selector below with the actual one from the page
+    flow_selector = "div:has-text('Flow') span.flow-value"  
 
-    # Extract flow in cfs
-    match = re.search(r"Flow.*?([0-9,]+\.[0-9]+)\s*cfs", text, re.S)
-    if not match:
-        raise Exception("Flow value not found")
+    try:
+        # Wait up to 15 seconds for the element
+        element = page.wait_for_selector(flow_selector, timeout=15000)
+    except:
+        raise Exception(f"Flow element not found for URL: {url}")
 
-    return float(match.group(1).replace(",", ""))
+    # Get the text content
+    text = element.inner_text().replace(",", "").strip()
+
+    # Parse float
+    try:
+        return float(text)
+    except ValueError:
+        raise Exception(f"Could not parse flow value: {text}")
 
 def main():
     state = load_state()
