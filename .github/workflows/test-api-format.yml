@@ -16,75 +16,77 @@ jobs:
       - name: Install requests
         run: pip install requests
       
-      - name: Run API format test
+      - name: Create and run test script
         run: |
-          python -c "
-          import requests
-          import json
+          cat > test_api.py << 'EOF'
+import requests
+import json
+
+structures = ['S44', 'S41', 'S155', 'S40']
+
+for structure in structures:
+    print('\n' + '='*60)
+    print(f'Testing {structure}')
+    print('='*60)
+    
+    # Test realtime endpoint
+    print('\n1. REALTIME ENDPOINT:')
+    url = 'https://sitedetailsreport.sfwmd.gov/realtime'
+    params = {'format': 'json', 'sites': structure, 'status': 'A'}
+    
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        print(f'Status: {r.status_code}')
+        if r.status_code == 200:
+            data = r.json()
+            print(f'Response type: {type(data)}')
+            
+            # Save to file
+            filename = f'realtime_{structure}.json'
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f'Saved to {filename}')
+            
+            if isinstance(data, list):
+                print(f'List length: {len(data)}')
+                if len(data) > 0:
+                    print('First item:')
+                    print(json.dumps(data[0], indent=2))
+            else:
+                print('Data structure:')
+                print(json.dumps(data, indent=2))
+        else:
+            print(f'Error: {r.text[:200]}')
+    except Exception as e:
+        print(f'Exception: {e}')
+    
+    # Test mdm endpoint  
+    print('\n2. MDM ENDPOINT:')
+    url = 'https://sitedetailsreport.sfwmd.gov/mdm'
+    params = {'site': structure}
+    
+    try:
+        r = requests.get(url, params=params, timeout=10)
+        print(f'Status: {r.status_code}')
+        if r.status_code == 200:
+            data = r.json()
+            print(f'Response type: {type(data)}')
+            
+            # Save to file
+            filename = f'mdm_{structure}.json'
+            with open(filename, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f'Saved to {filename}')
+            
+            print('Data structure:')
+            print(json.dumps(data, indent=2))
+        else:
+            print(f'Error: {r.text[:200]}')
+    except Exception as e:
+        print(f'Exception: {e}')
+EOF
           
-          structures = ['S44', 'S41', 'S155', 'S40']
-          
-          for structure in structures:
-              print(f'\\n{'='*60}')
-              print(f'Testing {structure}')
-              print('='*60)
-              
-              # Test realtime endpoint
-              print('\\n1. REALTIME ENDPOINT:')
-              url = 'https://sitedetailsreport.sfwmd.gov/realtime'
-              params = {'format': 'json', 'sites': structure, 'status': 'A'}
-              
-              try:
-                  r = requests.get(url, params=params, timeout=10)
-                  print(f'Status: {r.status_code}')
-                  if r.status_code == 200:
-                      data = r.json()
-                      print(f'Response type: {type(data)}')
-                      
-                      # Save to file
-                      filename = f'realtime_{structure}.json'
-                      with open(filename, 'w') as f:
-                          json.dump(data, f, indent=2)
-                      print(f'Saved to {filename}')
-                      
-                      if isinstance(data, list):
-                          print(f'List length: {len(data)}')
-                          if len(data) > 0:
-                              print('First item:')
-                              print(json.dumps(data[0], indent=2))
-                      else:
-                          print('Data structure:')
-                          print(json.dumps(data, indent=2))
-                  else:
-                      print(f'Error: {r.text[:200]}')
-              except Exception as e:
-                  print(f'Exception: {e}')
-              
-              # Test mdm endpoint  
-              print('\\n2. MDM ENDPOINT:')
-              url = 'https://sitedetailsreport.sfwmd.gov/mdm'
-              params = {'site': structure}
-              
-              try:
-                  r = requests.get(url, params=params, timeout=10)
-                  print(f'Status: {r.status_code}')
-                  if r.status_code == 200:
-                      data = r.json()
-                      print(f'Response type: {type(data)}')
-                      
-                      # Save to file
-                      filename = f'mdm_{structure}.json'
-                      with open(filename, 'w') as f:
-                          json.dump(data, f, indent=2)
-                      print(f'Saved to {filename}')
-                      
-                      print('Data structure:')
-                      print(json.dumps(data, indent=2))
-                  else:
-                      print(f'Error: {r.text[:200]}')
-              except Exception as e:
-                  print(f'Exception: {e}')
-          "
+          python test_api.py
       
       - name: Upload JSON responses
         uses: actions/upload-artifact@v4
