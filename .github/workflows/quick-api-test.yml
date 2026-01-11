@@ -1,0 +1,32 @@
+name: Quick API Test
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Test with curl
+        run: |
+          echo "Testing various API endpoints..."
+          
+          # Test 1: The endpoint that worked in browser
+          echo -e "\n1. Testing realtime endpoint:"
+          curl -s -H "Accept: application/json" "https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40&status=A" | head -300
+          
+          # Test 2: Try with different Accept header
+          echo -e "\n2. Testing with different headers:"
+          curl -s -H "Accept: application/json, text/plain, */*" -H "User-Agent: Mozilla/5.0" "https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40&status=A" | head -300
+          
+          # Test 3: Try without status parameter
+          echo -e "\n3. Testing without status:"
+          curl -s "https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40" | head -300
+          
+          # Test 4: Try to get the actual API from network tab
+          echo -e "\n4. Testing common API patterns:"
+          curl -s "https://www.sfwmd.gov/dbhydroplsql/web_io.report_process?v_station=S40&v_format=json" | head -300
+          
+          # Test 5: Check response headers
+          echo -e "\n5. Checking response headers:"
+          curl -I "https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40&status=A"
