@@ -215,6 +215,31 @@ def check_structures():
     
     return changes_detected
 
+            if last is None:  # First reading
+                logger.info(f"{structure}: {current} cfs (first reading)")
+                
+                # OPTIONAL: Alert if gate is already open on first check
+                if current > 0:
+                    logger.info(f"Gate already open on first check: {structure}")
+                    # Uncomment to get alert:
+                    # notify(structure, current, None)
+            
+            else:  # Subsequent readings
+                logger.info(f"{structure}: {current} cfs (last: {last} cfs, delta: {current - last:.1f} cfs)")
+                
+                # Gate opens (transition from 0 to >0)
+                if current > 0 and last == 0:
+                    logger.info(f"Gate opening detected for {structure}")
+                    notify(structure, current)
+                    changes_detected = True
+                
+                # Surge detection
+                elif current - last >= SURGE_THRESHOLD:
+                    delta = current - last
+                    logger.info(f"Surge detected for {structure}: +{delta} cfs")
+                    notify(structure, current, delta)
+                    changes_detected = True
+
 def main():
     """Main monitoring function"""
     logger.info("Starting spillway monitor with correct API...")
