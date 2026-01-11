@@ -24,43 +24,8 @@ jobs:
       - name: Create directories
         run: mkdir -p data logs
       
-      - name: Test API connection first
-        id: test-api
-        run: |
-          echo "Testing API connection..."
-          python -c "
-import requests
-url = 'https://sitedetailsreport.sfwmd.gov/realtime'
-params = {'format': 'json', 'sites': 'S40', 'status': 'A'}
-headers = {'Accept': 'application/json'}
-
-try:
-    r = requests.get(url, params=params, headers=headers, timeout=10)
-    print(f'Status: {r.status_code}')
-    print(f'Content-Type: {r.headers.get(\"content-type\")}')
-    
-    if r.status_code == 200:
-        print('API connection successful')
-        print('Response preview:', r.text[:100])
-    else:
-        print('API connection failed')
-except Exception as e:
-    print(f'Error: {e}')
-"
-      
       - name: Run monitor
-        if: steps.test-api.outcome == 'success'
         run: python monitor.py
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
-      
-      - name: Upload logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: monitor-failure-logs
-          path: |
-            logs/
-            data/
-          retention-days: 3
