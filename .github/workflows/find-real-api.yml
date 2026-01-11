@@ -1,9 +1,9 @@
-name: Find Real API
+name: Discover Real API
 
 on: workflow_dispatch
 
 jobs:
-  find-api:
+  discover:
     runs-on: ubuntu-latest
     
     steps:
@@ -16,107 +16,193 @@ jobs:
       - name: Install requests
         run: pip install requests
       
-      - name: Try different API endpoints
+      - name: Discover API endpoints
         run: |
-          cat > find_api.py << 'EOF'
+          cat > discover.py << 'EOF'
           import requests
           import json
+          import re
           
-          structures = ["S40", "S44", "S41", "S155"]
+          print("Discovering SFWMD API endpoints...")
+          print("=" * 60)
           
-          # Common SFWMD API patterns
+          # Structure to test
+          structure = "S40"
+          
+          # List of potential API endpoints to try
           endpoints = [
-              # Pattern 1: USGS-style water data
-              ("usgs_json", "https://waterservices.usgs.gov/nwis/iv", 
-               {"format": "json", "sites": None, "parameterCd": "00060"}),
-              
-              # Pattern 2: Different SFWMD endpoint
-              ("sfwmd_json", "https://www.sfwmd.gov/dbhydroplsql/rest/web_io.get_station_data", 
-               {"station": None, "format": "json"}),
-              
-              # Pattern 3: Another SFWMD pattern
-              ("sfwmd_api", "https://www.sfwmd.gov/dbhydroplsql/water_system_data.report_process", 
-               {"v_target": "stage_flow", "v_dbkey": None, "v_format": "json"}),
-              
-              # Pattern 4: Try with .json extension
-              ("json_direct", "https://sitedetailsreport.sfwmd.gov/api/realtime", 
-               {"sites": None, "status": "A"}),
+              # The URL from your successful browser test
+              ("direct_json", "https://sitedetailsreport.sfwmd.gov/realtime", 
+               {"format": "json", "sites": structure, "status": "A"}),
                
-              # Pattern 5: NWIS endpoint (common for water data)
-              ("nwis", "https://nwis.waterservices.usgs.gov/nwis/iv", 
-               {"format": "json", "sites": None, "parameterCd": "00060"}),
+              # Try without status parameter
+              ("no_status", "https://sitedetailsreport.sfwmd.gov/realtime", 
+               {"format": "json", "sites": structure}),
+               
+              # Try with different format
+              ("xml_format", "https://sitedetailsreport.sfwmd.gov/realtime", 
+               {"format": "xml", "sites": structure}),
+               
+              # Try different endpoint
+              ("api_v1", "https://sitedetailsreport.sfwmd.gov/api/v1/realtime", 
+               {"site": structure}),
+               
+              ("api_data", "https://sitedetailsreport.sfwmd.gov/api/data", 
+               {"station": structure}),
+               
+              # Old DBHYDRO endpoints
+              ("dbhydro_old", "https://www.sfwmd.gov/dbhydroplsql/web_io.report_process", 
+               {"v_station": structure, "v_format": "json"}),
+               
+              ("dbhydro_data", "https://www.sfwmd.gov/dbhydroplsql/rest/time_series_data.get_data", 
+               {"station_id": structure, "data_type": "FLOW"}),
+               
+              # Try with .json extension
+              ("json_ext", f"https://sitedetailsreport.sfwmd.gov/realtime/{structure}.json", 
+               {}),
+               
+              # Common water data APIs
+              ("usgs", "https://waterservices.usgs.gov/nwis/iv", 
+               {"format": "json", "sites": "02290800", "parameterCd": "00060"}),
           ]
           
-          headers = {
-              'User-Agent': 'Mozilla/5.0',
-              'Accept': 'application/json',
-          }
+          # Try different headers
+          headers_list = [
+              {"Accept": "application/json"},
+              {"Accept": "application/json, text/plain, */*"},
+              {"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+              {},  # No headers
+          ]
           
-          for structure in structures:
-              print(f"\\n{'='*60}")
-              print(f"Testing {structure}")
-              print('='*60)
+          successful_responses = []
+          
+          for endpoint_name, url, params in endpoints:
+              print(f"\\nTrying endpoint: {endpoint_name}")
+              print(f"URL: {url}")
               
-              for endpoint_name, base_url, base_params in endpoints:
-                  print(f"\\nTrying {endpoint_name}:")
-                  
-                  # Prepare params
-                  params = base_params.copy()
-                  for key, value in params.items():
-                      if value is None:
-                          params[key] = structure
+              for i, headers in enumerate(headers_list):
+                  print(f"  Headers set {i+1}: {headers}")
                   
                   try:
-                      response = requests.get(base_url, params=params, headers=headers, timeout=10)
-                      print(f"  Status: {response.status_code}")
-                      print(f"  URL: {response.url}")
+                      response = requests.get(url, params=params, headers=headers, timeout=15)
+                      print(f"    Status: {response.status_code}")
+                      print(f"    Content-Type: {response.headers.get('content-type', 'unknown')}")
                       
                       if response.status_code == 200:
                           # Check if it's JSON
+                          content_type = response.headers.get('content-type', '').lower()
                           text = response.text.strip()
-                          if text.startswith('{') or text.startswith('['):
+                          
+                          is_json = False
+                          if 'application/json' in content_type:
+                              is_json = True
+                          elif text.startswith('{') or text.startswith('['):
+                              is_json = True
+                          
+                          if is_json:
                               try:
                                   data = json.loads(text)
-                                  print(f"  ✓ Got JSON!")
-                                  print(f"  JSON type: {type(data)}")
+                                  print(f"    ✓ FOUND JSON RESPONSE!")
+                                  print(f"    JSON type: {type(data)}")
                                   
                                   # Save it
-                                  filename = f"{structure}_{endpoint_name}.json"
+                                  filename = f"found_{endpoint_name}_headers{i}.json"
                                   with open(filename, "w") as f:
                                       json.dump(data, f, indent=2)
-                                  print(f"  Saved to {filename}")
                                   
-                                  # Check for flow data
+                                  # Check for useful data
                                   if isinstance(data, dict):
-                                      print(f"  Keys: {list(data.keys())}")
-                                  elif isinstance(data, list) and len(data) > 0:
-                                      print(f"  List length: {len(data)}")
-                                      if isinstance(data[0], dict):
-                                          print(f"  First item keys: {list(data[0].keys())}")
+                                      print(f"    Keys: {list(data.keys())}")
+                                      # Look for flow-related keys
+                                      flow_keys = [k for k in data.keys() if 'flow' in k.lower() or 'discharge' in k.lower()]
+                                      if flow_keys:
+                                          print(f"    Found flow keys: {flow_keys}")
                                   
-                                  break  # Found working endpoint
+                                  successful_responses.append({
+                                      "endpoint": endpoint_name,
+                                      "url": response.url,
+                                      "headers": headers,
+                                      "filename": filename
+                                  })
                                   
                               except json.JSONDecodeError:
-                                  print(f"  ✗ Not valid JSON")
+                                  print(f"    ✗ Not valid JSON")
+                                  # Save anyway for inspection
+                                  filename = f"invalid_{endpoint_name}_headers{i}.txt"
+                                  with open(filename, "w") as f:
+                                      f.write(text[:1000])
                           else:
-                              print(f"  ✗ Not JSON: {text[:100]}")
+                              # Check if it's HTML
+                              if '<!doctype html>' in text.lower() or '<html' in text.lower():
+                                  print(f"    ✗ Returns HTML")
+                              else:
+                                  print(f"    ✗ Not JSON, length: {len(text)} chars")
+                                  # Save for inspection
+                                  filename = f"other_{endpoint_name}_headers{i}.txt"
+                                  with open(filename, "w") as f:
+                                      f.write(text[:1000])
                       else:
-                          print(f"  ✗ HTTP error")
+                          print(f"    ✗ HTTP {response.status_code}")
                           
                   except Exception as e:
-                      print(f"  ✗ Error: {e}")
-              
-              print("-" * 40)
+                      print(f"    ✗ Error: {e}")
           
-          print("\\nSearch complete!")
+          # Summary
+          print(f"\\n{'='*60}")
+          print("DISCOVERY SUMMARY:")
+          print('='*60)
+          
+          if successful_responses:
+              print(f"Found {len(successful_responses)} JSON responses:")
+              for resp in successful_responses:
+                  print(f"  - {resp['endpoint']}: {resp['url']}")
+                  print(f"    Saved as: {resp['filename']}")
+          else:
+              print("No JSON responses found. Trying one more approach...")
+              
+              # Try to fetch the main page and look for API URLs in JavaScript
+              print("\\nFetching main page to look for API URLs...")
+              main_url = "https://sitedetailsreport.sfwmd.gov/"
+              try:
+                  response = requests.get(main_url, timeout=10)
+                  html = response.text
+                  
+                  # Look for API URLs in JavaScript
+                  api_patterns = [
+                      r'https?://[^"\']+\.json[^"\']*',
+                      r'api[^"\']+',
+                      r'realtime[^"\']+',
+                      r'fetch\(["\']([^"\']+)["\']\)',
+                      r'axios\.get\(["\']([^"\']+)["\']\)',
+                  ]
+                  
+                  for pattern in api_patterns:
+                      matches = re.findall(pattern, html, re.IGNORECASE)
+                      if matches:
+                          print(f"Found pattern '{pattern}':")
+                          for match in matches[:5]:  # Show first 5
+                              print(f"  - {match}")
+                              
+                  # Save HTML for manual inspection
+                  with open("main_page.html", "w") as f:
+                      f.write(html)
+                  print("Saved main page to main_page.html")
+                  
+              except Exception as e:
+                  print(f"Error fetching main page: {e}")
+          
+          print("\\nDiscovery complete!")
           EOF
           
-          python find_api.py
+          python discover.py
       
-      - name: Upload found endpoints
+      - name: Upload discovery results
         uses: actions/upload-artifact@v4
         with:
-          name: api-discovery-results
+          name: api-discovery
           path: |
-            *.json
+            found_*.json
+            invalid_*.txt
+            other_*.txt
+            main_page.html
           retention-days: 7
