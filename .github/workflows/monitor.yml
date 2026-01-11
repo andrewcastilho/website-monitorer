@@ -2,8 +2,8 @@ name: Spillway Monitor
 
 on:
   schedule:
-    - cron: '*/1 * * * *'  # every 10 minutes
-  workflow_dispatch:        # optional: allows manual runs
+    - cron: '*/10 * * * *'  # every 10 minutes
+  workflow_dispatch:        # allows manual runs
 
 jobs:
   monitor:
