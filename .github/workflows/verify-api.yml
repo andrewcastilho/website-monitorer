@@ -1,0 +1,49 @@
+name: Verify API Works
+
+on: workflow_dispatch
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Quick cURL test
+        run: |
+          echo "Quick verification of API endpoint..."
+          echo "=" * 60
+          
+          # Test one structure with cURL
+          curl -s \
+            -H "accept: application/json, text/plain, */*" \
+            -H "accept-language: en-US,en;q=0.9" \
+            -H "origin: https://sitedetailsreport.sfwmd.gov" \
+            -H "referer: https://sitedetailsreport.sfwmd.gov/" \
+            -H "user-agent: Mozilla/5.0" \
+            "https://sitestatus.api.sfwmd.gov/v1/sitestatus/realtime?format=json&sites=S40&status=A" \
+            | python3 -m json.tool > response.json 2>/dev/null || echo "Not valid JSON"
+          
+          echo -e "\nResponse saved to response.json"
+          echo -e "\nChecking if we got data..."
+          
+          if [ -f "response.json" ]; then
+            echo "First few lines of response:"
+            head -20 response.json
+            
+            # Check for flow data
+            if grep -q '"parameterName" : "FLOW"' response.json; then
+              echo -e "\n✓ Found FLOW data in response!"
+              FLOW_VALUE=$(grep -A5 '"parameterName" : "FLOW"' response.json | grep '"value"' | head -1 | sed 's/.*: //' | tr -d ', ')
+              echo "Flow value: $FLOW_VALUE cfs"
+            else
+              echo -e "\n✗ No FLOW data found"
+            fi
+          else
+            echo "✗ Could not get valid JSON response"
+          fi
+      
+      - name: Upload verification result
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-verification
+          path: response.json
+          retention-days: 7
