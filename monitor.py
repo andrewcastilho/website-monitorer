@@ -86,7 +86,7 @@ def notify(structure, flow, delta=None):
         msg = f"🚨 {structure} FLOW ALERT\nFlow: {flow} cfs"
         if delta:
             msg += f"\nSurge: +{delta} cfs"
-        msg += f"\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        msg += f"\nTime: {datetime.now().strftime('%Y-%m-d %H:%M:%S')}"
         
         response = requests.post(
             "https://api.pushover.net/1/messages.json",
@@ -153,6 +153,9 @@ def get_flow(structure):
         debug_file.parent.mkdir(exist_ok=True)
         with open(debug_file, "w") as f:
             json.dump(data, f, indent=2)
+        
+        # Debug: Log the structure of the response
+        logger.debug(f"Response keys: {list(data.keys())}")
         
         # Parse the response - based on the JSON structure you showed earlier
         if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
