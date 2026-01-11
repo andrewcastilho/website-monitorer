@@ -106,23 +106,78 @@ def notify(structure, flow, delta=None):
         logger.error(f"Error sending notification: {e}")
         return False
 
-def get_gate_data(structure):
-    """Get gate opening data directly"""
-    form_data = {
-        "v_target_flag": "public",
-        "v_report_type": "format6",
-        "v_site_list": structure,
-        "v_datatype_list": "gate",  # Specifically request gate data
-        "v_begin_date": datetime.now().strftime("%Y-%m-%d"),
-        "v_end_date": datetime.now().strftime("%Y-%m-%d"),
-        "v_show_raw": "Y",
-        "v_show_summary": "N",
-        "v_show_approved": "Y",
-        "v_show_provisional": "Y"
-    }
-    
-    response = requests.post(API_URL, data=form_data, headers=HEADERS, timeout=30)
-    # Parse gate openings from response
+def get_flow(structure):
+    """
+    Get flow data from the CORRECT DBHYDRO API endpoint
+    Returns: flow value in cfs or None if error
+    """
+    try:
+        # CORRECT: POST request with form data
+        form_data = {
+            "v_target_flag": "public",
+            "v_report_type": "format6",
+            "v_site_list": structure,
+            "v_datatype_list": "flow",  # Get flow data
+            "v_begin_date": datetime.now().strftime("%Y-%m-%d"),
+            "v_end_date": datetime.now().strftime("%Y-%m-%d"),
+            "v_show_raw": "Y",
+            "v_show_summary": "N",
+            "v_show_approved": "Y",
+            "v_show_provisional": "Y"
+        }
+        
+        logger.debug(f"Fetching flow for {structure} from DBHYDRO API")
+        
+        response = requests.post(
+            "https://my.sfwmd.gov/dbhydroplsql/web_io.report_process",
+            data=form_data,
+            headers=HEADERS,
+            timeout=30
+        )
+        
+        # Debug logging
+        logger.debug(f"Status: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"API returned status {response.status_code} for {structure}")
+            return None
+        
+        # Parse the JSON response
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON for {structure}: {e}")
+            logger.error(f"Response sample: {response.text[:500]}")
+            return None
+        
+        # Navigate the JSON structure (same as before)
+        if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
+            time_series_list = data["timeSeriesResponse"]["timeSeries"]
+            
+            # Look for FLOW parameter
+            for time_series in time_series_list:
+                param = time_series.get("parameter", {})
+                if param.get("parameterName") == "FLOW" and param.get("unit", {}).get("unitCode") == "cfs":
+                    if "values" in time_series and len(time_series["values"]) > 0:
+                        latest_value = time_series["values"][0]
+                        if "value" in latest_value:
+                            flow_value = latest_value["value"]
+                            # Get timestamp too for freshness check
+                            timestamp = latest_value.get("dateTime")
+                            logger.info(f"Got flow for {structure}: {flow_value} cfs at {timestamp}")
+                            return float(flow_value)
+        
+        logger.warning(f"No flow data found in response for {structure}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"HTTP error fetching data for {structure}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching flow for {structure}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
 
 def check_structures():
     """Check all structures for flow changes"""
