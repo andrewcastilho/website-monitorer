@@ -19,6 +19,7 @@ SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
 # CORRECT API endpoint from your cURL command
 API_URL = "https://sitedetailsreport.sfwmd.gov/dbhydroplsql/web_io.report_process"
+
 # Headers from your cURL command
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
@@ -127,11 +128,13 @@ def get_flow(structure):
         
         logger.debug(f"Fetching flow for {structure} from DBHYDRO API")
         
+        # USE THE API_URL VARIABLE INSTEAD OF HARDCODED URL
         response = requests.post(
-            "https://my.sfwmd.gov/dbhydroplsql/web_io.report_process",
+            API_URL,  # ← FIXED: Use the variable, not hardcoded URL
             data=form_data,
             headers=HEADERS,
-            timeout=30
+            timeout=30,
+            verify=False  # ← ADD THIS to bypass SSL error for testing
         )
         
         # Debug logging
