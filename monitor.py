@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Spillway Gate Monitor
-Monitors SFWMD DBHYDRO flow data and sends notifications when spillway gates open.
+Spillway Gate Monitor - Using correct SFWMD API endpoints
 """
 
 import requests
@@ -9,31 +8,21 @@ import json
 import os
 import logging
 from datetime import datetime
-import time
 from pathlib import Path
 
 # Configuration
 STRUCTURES = ["S44", "S41", "S155", "S40"]
 STATE_FILE = Path("data/last_values.json")
 LOG_FILE = Path("logs/monitor.log")
-CONFIG_FILE = Path("config/config.json")
 
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
-# API Configuration
-DBHYDRO_URL = "https://www.sfwmd.gov/dbhydroplsql/web_io.report_process"
-PARAMS = {
-    "v_target": "stage_flow",
-    "v_run_mode": "onLine",
-    "v_js_flag": "Y",
-    "v_report_type": "format",
-    "v_period": "uspec",
-    "v_date_type": "date"
-}
+# Base URL from your findings
+BASE_URL = "https://sitedetailsreport.sfwmd.gov"
 
 # Setup logging
 def setup_logging():
-    """Configure logging to both file and console"""
+    """Configure logging"""
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     
     logging.basicConfig(
@@ -49,7 +38,7 @@ def setup_logging():
 logger = setup_logging()
 
 def load_state():
-    """Load last known flow values from state file"""
+    """Load last known flow values"""
     try:
         if STATE_FILE.exists():
             with open(STATE_FILE, "r") as f:
@@ -60,7 +49,7 @@ def load_state():
         return {}
 
 def save_state(state):
-    """Save current flow values to state file"""
+    """Save current flow values"""
     try:
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(STATE_FILE, "w") as f:
@@ -69,16 +58,13 @@ def save_state(state):
         logger.error(f"Error saving state: {e}")
 
 def notify(structure, flow, delta=None):
-    """
-    Send notification via Pushover
-    Returns: True if successful, False otherwise
-    """
+    """Send Pushover notification"""
     try:
         token = os.environ.get("PUSHOVER_TOKEN")
         user = os.environ.get("PUSHOVER_USER")
         
         if not token or not user:
-            logger.error("Pushover credentials not set in environment variables")
+            logger.error("Pushover credentials not set")
             return False
         
         msg = f"🚨 {structure} FLOW ALERT\nFlow: {flow} cfs"
@@ -93,8 +79,7 @@ def notify(structure, flow, delta=None):
                 "user": user,
                 "message": msg,
                 "title": "Spillway Alert",
-                "priority": 1,
-                "timestamp": int(time.time())
+                "priority": 1
             },
             timeout=30
         )
@@ -102,77 +87,128 @@ def notify(structure, flow, delta=None):
         logger.info(f"Notification sent for {structure}")
         return True
     except Exception as e:
-        logger.error(f"Error sending notification for {structure}: {e}")
+        logger.error(f"Error sending notification: {e}")
         return False
 
-def get_flow(structure):
+def get_flow_from_realtime(structure):
     """
-    Fetch flow data for a specific structure from DBHYDRO
-    Returns: flow value in cfs or None if error
+    Get flow data from realtime endpoint
+    URL: https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40&status=A
     """
     try:
-        params = PARAMS.copy()
-        params.update({
-            "v_station": structure,
-            "v_dbkey": get_dbkey(structure),
-            "v_start_date": datetime.now().strftime("%m/%d/%Y"),
-            "v_end_date": datetime.now().strftime("%m/%d/%Y"),
-            "v_format": "json"
-        })
+        url = f"{BASE_URL}/realtime"
+        params = {
+            "format": "json",
+            "sites": structure,
+            "status": "A"
+        }
         
-        logger.debug(f"Fetching data for {structure} with params: {params}")
-        
-        response = requests.get(DBHYDRO_URL, params=params, timeout=30)
+        logger.debug(f"Fetching realtime data for {structure}")
+        response = requests.get(url, params=params, timeout=30)
         response.raise_for_status()
         
         data = response.json()
         
-        # The API returns data in different format, need to parse accordingly
+        # Save raw response for debugging
+        with open(f"realtime_{structure}.json", "w") as f:
+            json.dump(data, f, indent=2)
+        
+        # Parse the response based on actual structure
+        # The API returns an array of objects
         if isinstance(data, list) and len(data) > 0:
-            # Extract flow value from the response
-            # Adjust this parsing based on actual API response structure
             for item in data:
-                if "data_value" in item:
+                # Look for discharge/flow data
+                # Common field names based on typical hydrology APIs
+                if "discharge" in item:
+                    flow_value = item["discharge"]
+                elif "flow" in item:
+                    flow_value = item["flow"]
+                elif "value" in item:
+                    flow_value = item["value"]
+                else:
+                    # Try to find any numeric value that could be flow
+                    for key, value in item.items():
+                        if isinstance(value, (int, float)) and key.lower() not in ["id", "timestamp", "date"]:
+                            flow_value = value
+                            break
+                    else:
+                        continue
+                
+                try:
+                    flow_float = float(flow_value)
+                    logger.info(f"Found flow for {structure}: {flow_float} cfs")
+                    return flow_float
+                except (ValueError, TypeError):
+                    continue
+        
+        logger.warning(f"No flow data found in realtime response for {structure}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error getting realtime data for {structure}: {e}")
+        return None
+
+def get_flow_from_mdm(structure):
+    """
+    Get flow data from mdm endpoint (backup)
+    URL: https://sitedetailsreport.sfwmd.gov/mdm?site=S40
+    """
+    try:
+        url = f"{BASE_URL}/mdm"
+        params = {"site": structure}
+        
+        logger.debug(f"Fetching mdm data for {structure}")
+        response = requests.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Save raw response for debugging
+        with open(f"mdm_{structure}.json", "w") as f:
+            json.dump(data, f, indent=2)
+        
+        # MDM endpoint might have different structure
+        # Look for flow/discharge data
+        if isinstance(data, dict):
+            # Check common field names
+            for field in ["discharge", "flow", "discharge_cfs", "flow_cfs", "value"]:
+                if field in data:
                     try:
-                        flow_value = float(item["data_value"])
+                        flow_value = float(data[field])
+                        logger.info(f"Found flow in mdm for {structure}: {flow_value} cfs")
                         return flow_value
                     except (ValueError, TypeError):
                         continue
         
-        logger.warning(f"No valid flow data found for {structure}")
         return None
         
-    except requests.exceptions.RequestException as e:
-        logger.error(f"HTTP error fetching data for {structure}: {e}")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error for {structure}: {e}")
-        return None
     except Exception as e:
-        logger.error(f"Error fetching flow for {structure}: {e}")
+        logger.error(f"Error getting mdm data for {structure}: {e}")
         return None
 
-def get_dbkey(structure):
+def get_flow(structure):
     """
-    Map structure IDs to DBKEY values used by DBHYDRO API
-    You may need to adjust these based on actual DBHYDRO database keys
+    Main function to get flow - tries realtime first, then mdm
     """
-    dbkey_map = {
-        "S44": "FLA02379",  # Example, need actual DBKEY values
-        "S41": "FLA02376",  # Example, need actual DBKEY values
-        "S155": "FLA02370", # Example, need actual DBKEY values
-        "S40": "FLA02373"   # Example, need actual DBKEY values
-    }
-    return dbkey_map.get(structure, structure)
+    # Try realtime endpoint first
+    flow = get_flow_from_realtime(structure)
+    
+    # If realtime fails, try mdm endpoint
+    if flow is None:
+        logger.info(f"Realtime failed for {structure}, trying mdm endpoint...")
+        flow = get_flow_from_mdm(structure)
+    
+    return flow
 
 def check_structures():
-    """Check all configured structures for flow changes"""
+    """Check all structures for flow changes"""
     state = load_state()
     changes_detected = False
     
     for structure in STRUCTURES:
         try:
             logger.info(f"Checking {structure}...")
+            
             current = get_flow(structure)
             
             if current is None:
@@ -211,28 +247,14 @@ def check_structures():
     return changes_detected
 
 def main():
-    """Main monitoring loop"""
-    logger.info("Starting spillway monitor...")
+    """Main monitoring function"""
+    logger.info("Starting spillway monitor with correct API endpoints...")
     
-    # Load configuration if exists
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                config = json.load(f)
-            # Update structures from config if present
-            if "structures" in config:
-                global STRUCTURES
-                STRUCTURES = config["structures"]
-                logger.info(f"Loaded {len(STRUCTURES)} structures from config")
-        except Exception as e:
-            logger.error(f"Error loading config: {e}")
-    
-    # Check environment variables
+    # Check if Pushover credentials are set
     if not os.environ.get("PUSHOVER_TOKEN") or not os.environ.get("PUSHOVER_USER"):
-        logger.warning("Pushover credentials not found in environment variables")
-        logger.warning("Set PUSHOVER_TOKEN and PUSHOVER_USER environment variables")
+        logger.warning("Pushover credentials not found in environment")
+        logger.warning("Notifications will not be sent")
     
-    # Run single check
     check_structures()
     logger.info("Check completed")
 
