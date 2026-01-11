@@ -5,6 +5,10 @@ on:
     - cron: '*/10 * * * *'  # Every 10 minutes
   workflow_dispatch:        # Manual trigger
 
+env:
+  # Headers for the API (from your cURL command)
+  API_HEADERS: '{"accept": "application/json, text/plain, */*", "accept-language": "en-US,en;q=0.9", "origin": "https://sitedetailsreport.sfwmd.gov", "priority": "u=1, i", "referer": "https://sitedetailsreport.sfwmd.gov/", "sec-ch-ua": "\"Google Chrome\";v=\"143\", \"Chromium\";v=\"143\", \"Not A(Brand\";v=\"24\"", "sec-ch-ua-mobile": "?0", "sec-ch-ua-platform": "\"Windows\"", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-site", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"}'
+
 jobs:
   monitor:
     runs-on: ubuntu-latest
@@ -29,3 +33,14 @@ jobs:
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+      
+      - name: Upload logs for debugging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitor-logs
+          path: |
+            logs/
+            data/
+          retention-days: 3
+          if-no-files-found: ignore
