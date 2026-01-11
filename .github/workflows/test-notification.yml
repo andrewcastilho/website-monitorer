@@ -1,0 +1,60 @@
+name: Test Notification
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install requests
+        run: pip install requests
+      
+      - name: Test Pushover notification
+        run: |
+          python -c "
+import os
+import requests
+from datetime import datetime
+
+# Test notification
+token = os.environ.get('PUSHOVER_TOKEN')
+user = os.environ.get('PUSHOVER_USER')
+
+if not token or not user:
+    print('✗ Pushover credentials not set')
+    print('Set PUSHOVER_TOKEN and PUSHOVER_USER secrets')
+else:
+    print('Testing Pushover notification...')
+    
+    msg = '🔔 TEST: Spillway Monitor is working!\\n'
+    msg += f'Time: {datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")}\\n'
+    msg += 'If you receive this, notifications are configured correctly.'
+    
+    try:
+        response = requests.post(
+            'https://api.pushover.net/1/messages.json',
+            data={
+                'token': token,
+                'user': user,
+                'message': msg,
+                'title': 'Spillway Monitor Test',
+                'priority': 0  # Normal priority
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        print('✓ Test notification sent successfully!')
+        print('Check your Pushover app for the test message.')
+    except Exception as e:
+        print(f'✗ Failed to send notification: {e}')
+"
+        env:
+          PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
+          PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
