@@ -13,69 +13,32 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      - name: Debug - List files
-        run: |
-          echo "Repository structure:"
-          find . -type f -name "*.py" -o -name "*.txt" -o -name "*.yml" -o -name "*.yaml" | sort
-          echo ""
-          echo "Current directory contents:"
-          ls -la
-          echo ""
-          echo "Python files:"
-          find . -name "*.py"
-      
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
       
       - name: Install dependencies
-        run: |
-          echo "Installing dependencies..."
-          pip install requests
-          echo "Dependencies installed."
+        run: pip install requests
       
       - name: Create directories
-        run: |
-          mkdir -p data logs
-          echo "Created data and logs directories"
+        run: mkdir -p data logs
       
-      - name: Check if monitor.py exists
-        run: |
-          if [ -f "monitor.py" ]; then
-            echo "Found monitor.py in root directory"
-          elif [ -f "spillway_monitor/monitor.py" ]; then
-            echo "Found monitor.py in spillway_monitor directory"
-          else
-            echo "ERROR: monitor.py not found!"
-            find . -name "monitor.py" || echo "No monitor.py found anywhere"
-            exit 1
-          fi
-      
-      - name: Run monitor script
-        id: run-monitor
-        run: |
-          echo "Running monitor script..."
-          # Try different locations for monitor.py
-          if [ -f "monitor.py" ]; then
-            python monitor.py
-          elif [ -f "spillway_monitor/monitor.py" ]; then
-            python -m spillway_monitor.monitor || python spillway_monitor/monitor.py
-          else
-            echo "ERROR: Could not find monitor script"
-            exit 1
-          fi
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+      - name: Run monitor
+        run: python monitor.py
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
       
-      - name: Save artifacts
+      - name: Upload API responses for debugging
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: spillway-data
+          name: api-debug-data
           path: |
-            data/
+            realtime_*.json
+            mdm_*.json
             logs/
+            data/
           retention-days: 7
+          if-no-files-found: ignore
