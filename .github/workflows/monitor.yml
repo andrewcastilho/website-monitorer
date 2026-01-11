@@ -13,6 +13,8 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
+  DATA_DIR: 'data'
+  LOG_DIR: 'logs'
 
 jobs:
   monitor:
@@ -20,18 +22,16 @@ jobs:
     timeout-minutes: 10
     
     steps:
-      # 1️⃣ Checkout repository with full history
+      # 1️⃣ Checkout repository
       - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0  # Fetch all history for state comparison
+        uses: actions/checkout@v4
     
       # 2️⃣ Set up Python with caching
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'  # Enable pip caching
+          cache: 'pip'
     
       # 3️⃣ Install dependencies
       - name: Install dependencies
@@ -43,21 +43,24 @@ jobs:
       # 4️⃣ Create necessary directories
       - name: Create data and log directories
         run: |
-          mkdir -p data logs
+          mkdir -p ${{ env.DATA_DIR }} ${{ env.LOG_DIR }}
     
       # 5️⃣ Load previous state (if exists)
       - name: Load previous state
-        uses: actions/cache@v3
+        id: cache-state
+        uses: actions/cache@v4
         with:
-          path: data
-          key: ${{ runner.os }}-spillway-state-${{ github.sha }}
+          path: ${{ env.DATA_DIR }}
+          key: spillway-state-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-spillway-state-
+            spillway-state-${{ runner.os }}-
     
       # 6️⃣ Run the monitor script
       - name: Run spillway monitor
+        id: monitor
         run: |
           python -m spillway_monitor.monitor
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
@@ -65,32 +68,31 @@ jobs:
     
       # 7️⃣ Save current state for next run
       - name: Save monitoring state
-        uses: actions/cache@v3
+        if: steps.monitor.outputs.exit_code == '0'
+        uses: actions/cache@v4
         with:
-          path: data
-          key: ${{ runner.os }}-spillway-state-${{ github.sha }}
+          path: ${{ env.DATA_DIR }}
+          key: spillway-state-${{ runner.os }}-${{ github.sha }}
     
       # 8️⃣ Upload logs as artifact (for debugging)
       - name: Upload logs artifact
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: monitor-logs
+          name: monitor-logs-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            logs/
-            data/
+            ${{ env.LOG_DIR }}/
+            ${{ env.DATA_DIR }}/
           retention-days: 7
+          if-no-files-found: ignore
     
-      # 9️⃣ Send notification on failure
-      - name: Notify on workflow failure
-        if: failure()
-        uses: appleboy/telegram-action@master
+      # 9️⃣ Upload monitor script output
+      - name: Upload monitor output
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: |
-            ❌ Spillway Monitor Workflow Failed!
-            Repository: ${{ github.repository }}
-            Run: ${{ github.run_id }}
-            Commit: ${{ github.sha }}
-            Workflow: ${{ github.workflow }}
+          name: monitor-output-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ github.workspace }}/monitor_output.log
+          retention-days: 7
+          if-no-files-found: ignore
