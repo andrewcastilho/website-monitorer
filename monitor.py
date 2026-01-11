@@ -193,7 +193,7 @@ def check_structures():
                 if current > 0:
                     logger.info(f"Gate already open on first check: {structure}")
                     # Uncomment the line below to get alert for already open gates
-                     notify(structure, current, None)
+                    notify(structure, current, None)
             
             else:  # Subsequent readings
                 logger.info(f"{structure}: {current} cfs (last: {last} cfs, delta: {current - last:.1f} cfs)")
