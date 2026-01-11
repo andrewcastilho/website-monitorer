@@ -13,6 +13,7 @@ STRUCTURES = {
 }
 
 STATE_FILE = "last_values.json"
+SIGNIFICANT_CHANGE_CFS = 500  # notify if flow increases by this much
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -22,13 +23,16 @@ def load_state():
 def save_state(state):
     json.dump(state, open(STATE_FILE, "w"))
 
-def notify(structure, value):
+def notify(structure, value, change=None):
+    message = f"🚨 {structure} FLOW ALERT\nFlow: {value} cfs"
+    if change:
+        message += f" (+{change} cfs)"
     requests.post(
         "https://api.pushover.net/1/messages.json",
         data={
             "token": os.environ["PUSHOVER_TOKEN"],
             "user": os.environ["PUSHOVER_USER"],
-            "message": f"🚨 {structure} FLOW DETECTED\nFlow: {value} cfs"
+            "message": message
         }
     )
 
@@ -40,11 +44,9 @@ def get_flow_value(page, url):
 
     # Extract flow in cfs
     match = re.search(r"Flow.*?([0-9,]+\.[0-9]+)\s*cfs", text, re.S)
-
     if not match:
         raise Exception("Flow value not found")
 
-    # Remove commas and convert to float
     return float(match.group(1).replace(",", ""))
 
 def main():
@@ -61,9 +63,13 @@ def main():
 
                 print(f"{structure}: {current} cfs (last: {last})")
 
-                # Notify only when flow transitions from 0 → >0
+                # Notify when flow goes from 0 → >0
                 if current > 0.0 and last == 0.0:
                     notify(structure, current)
+
+                # Notify on significant increase
+                elif current - last >= SIGNIFICANT_CHANGE_CFS:
+                    notify(structure, current, change=current - last)
 
                 state[structure] = current
 
