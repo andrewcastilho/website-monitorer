@@ -10,7 +10,6 @@ STRUCTURES = {
     "S41": "https://sitedetailsreport.sfwmd.gov/#/sites/S41",
     "S155": "https://sitedetailsreport.sfwmd.gov/#/sites/S155",
     "S40": "https://sitedetailsreport.sfwmd.gov/#/sites/S40",
-  
 }
 
 STATE_FILE = "last_values.json"
@@ -29,21 +28,24 @@ def notify(structure, value):
         data={
             "token": os.environ["PUSHOVER_TOKEN"],
             "user": os.environ["PUSHOVER_USER"],
-            "message": f"🚨 {structure} GATE OPEN\nGate Opening: {value} ft"
+            "message": f"🚨 {structure} FLOW DETECTED\nFlow: {value} cfs"
         }
     )
 
-def get_gate_value(page, url):
+def get_flow_value(page, url):
     page.goto(url, timeout=60000)
-    page.wait_for_timeout(8000)
+    page.wait_for_timeout(8000)  # wait for dynamic content
 
     text = page.content()
-    match = re.search(r"Gate Opening.*?([0-9]+\.[0-9]+)", text, re.S)
+
+    # Extract flow in cfs
+    match = re.search(r"Flow.*?([0-9,]+\.[0-9]+)\s*cfs", text, re.S)
 
     if not match:
-        raise Exception("Gate Opening value not found")
+        raise Exception("Flow value not found")
 
-    return float(match.group(1))
+    # Remove commas and convert to float
+    return float(match.group(1).replace(",", ""))
 
 def main():
     state = load_state()
@@ -54,12 +56,12 @@ def main():
 
         for structure, url in STRUCTURES.items():
             try:
-                current = get_gate_value(page, url)
+                current = get_flow_value(page, url)
                 last = state.get(structure, 0.0)
 
-                print(f"{structure}: {current} ft (last: {last})")
+                print(f"{structure}: {current} cfs (last: {last})")
 
-                # Notify only when opening transitions from 0 → >0
+                # Notify only when flow transitions from 0 → >0
                 if current > 0.0 and last == 0.0:
                     notify(structure, current)
 
