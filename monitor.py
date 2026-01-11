@@ -148,42 +148,62 @@ def get_flow(structure):
             logger.error(f"Response first 500 chars: {response.text[:500]}")
             return None
         
-        # Debug: Log the structure of the response
-        logger.debug(f"Response keys: {list(data.keys())}")
+        # Save raw response for debugging
+        debug_file = Path(f"logs/{structure}_response.json")
+        debug_file.parent.mkdir(exist_ok=True)
+        with open(debug_file, "w") as f:
+            json.dump(data, f, indent=2)
         
-        # Parse the real-time API response structure
-        # The structure might be different from the detailed time series API
-        if "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
-            site_data = data["data"][0]
-            logger.debug(f"Site data keys: {list(site_data.keys())}")
+        # Parse the response - based on the JSON structure you showed earlier
+        if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
+            time_series_list = data["timeSeriesResponse"]["timeSeries"]
+            logger.debug(f"Found {len(time_series_list)} time series for {structure}")
             
-            # Look for flow-related fields
-            # Common field names might include: "flow", "discharge", "cfs", "value"
-            for key, value in site_data.items():
-                logger.debug(f"  {key}: {value}")
-                # Check if this looks like a flow value
-                if key.lower() in ["flow", "discharge", "cfs", "value"] and isinstance(value, (int, float)):
-                    logger.info(f"Found flow for {structure}: {value} cfs")
-                    return float(value)
+            # Look for the FLOW time series (like in your original JSON)
+            for time_series in time_series_list:
+                param = time_series.get("parameter", {})
+                param_name = param.get("parameterName", "")
+                unit_code = param.get("unit", {}).get("unitCode", "")
+                
+                # Check for FLOW parameter with cfs unit
+                if param_name == "FLOW" and unit_code == "cfs":
+                    if "values" in time_series and len(time_series["values"]) > 0:
+                        # Get the most recent value
+                        latest_value = time_series["values"][0]
+                        if "value" in latest_value:
+                            flow_value = latest_value["value"]
+                            timestamp = latest_value.get("dateTime", "No timestamp")
+                            
+                            # Check if it's valid (not the noDataValue)
+                            no_data_value = param.get("noDataValue", -99999.0)
+                            if flow_value != no_data_value:
+                                logger.info(f"Got flow for {structure}: {flow_value} cfs at {timestamp}")
+                                return float(flow_value)
+                            else:
+                                logger.debug(f"Flow value is noDataValue for {structure}")
+                                return 0.0
+                
+                # Also check for gate openings
+                elif param_name == "GATE OPENING":
+                    if "values" in time_series and len(time_series["values"]) > 0:
+                        latest_value = time_series["values"][0]
+                        if "value" in latest_value:
+                            gate_value = latest_value["value"]
+                            logger.debug(f"Gate opening for {structure}: {gate_value} ft")
+                            # If gate is open, return a small positive flow to trigger alert
+                            if gate_value > 0:
+                                logger.info(f"Gate open for {structure}: {gate_value} ft")
+                                return 1.0
             
-            # If no flow field found, check for nested structures
-            if "parameters" in site_data:
-                for param in site_data["parameters"]:
-                    if param.get("name", "").lower() in ["flow", "discharge"]:
-                        flow_value = param.get("value")
-                        if flow_value is not None:
-                            logger.info(f"Found flow in parameters for {structure}: {flow_value}")
-                            return float(flow_value)
+            # If no flow found, check for any time series with recent data
+            logger.warning(f"No FLOW data found for {structure}")
+            for i, ts in enumerate(time_series_list):
+                param = ts.get("parameter", {})
+                logger.debug(f"Series {i}: {param.get('parameterName')} ({param.get('unit', {}).get('unitCode')})")
         
-        # Alternative: Look for gate status and infer flow
-        # If gates are open (>0), assume there's flow
-        for key, value in site_data.items():
-            if "gate" in key.lower() and isinstance(value, (int, float)):
-                if value > 0:
-                    logger.info(f"Gate open for {structure}: {value} ft, assuming flow > 0")
-                    return 1.0  # Return a positive value to trigger alert
+        else:
+            logger.error(f"Unexpected response structure for {structure}")
         
-        logger.warning(f"No flow data found in real-time response for {structure}")
         return 0.0  # Default to 0 if no flow found
         
     except requests.exceptions.RequestException as e:
@@ -258,27 +278,6 @@ def main():
     if not os.environ.get("PUSHOVER_TOKEN") or not os.environ.get("PUSHOVER_USER"):
         logger.warning("Pushover credentials not found in environment")
         logger.warning("Notifications will not be sent")
-    
-    # First, let's see what the API response looks like
-    logger.info("Testing API connection...")
-    test_response = requests.get(
-        API_URL,
-        params={"format": "json", "sites": "S155", "status": "A"},
-        headers=HEADERS,
-        timeout=10
-    )
-    
-    if test_response.status_code == 200:
-        try:
-            test_data = test_response.json()
-            logger.info(f"API test successful. Response structure: {list(test_data.keys())}")
-            # Log a sample of the data
-            import pprint
-            logger.debug(f"Sample response:\n{pprint.pformat(test_data, depth=2)}")
-        except:
-            logger.error(f"API test failed to parse JSON: {test_response.text[:200]}")
-    else:
-        logger.error(f"API test failed with status: {test_response.status_code}")
     
     check_structures()
     logger.info("Check completed")
