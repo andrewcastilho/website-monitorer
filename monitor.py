@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spillway Gate Monitor - Using correct SFWMD API endpoints
+Spillway Gate Monitor - Using correct SFWMD API
 """
 
 import requests
@@ -17,8 +17,12 @@ LOG_FILE = Path("logs/monitor.log")
 
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
-# Base URL from your findings
-BASE_URL = "https://sitedetailsreport.sfwmd.gov"
+# API endpoint from your discovery
+API_URL = "https://sitedetailsreport.sfwmd.gov/realtime"
+API_PARAMS = {
+    "format": "json",
+    "status": "A"
+}
 
 # Setup logging
 def setup_logging():
@@ -90,115 +94,60 @@ def notify(structure, flow, delta=None):
         logger.error(f"Error sending notification: {e}")
         return False
 
-def get_flow_from_realtime(structure):
-    """
-    Get flow data from realtime endpoint
-    URL: https://sitedetailsreport.sfwmd.gov/realtime?format=json&sites=S40&status=A
-    """
-    try:
-        url = f"{BASE_URL}/realtime"
-        params = {
-            "format": "json",
-            "sites": structure,
-            "status": "A"
-        }
-        
-        logger.debug(f"Fetching realtime data for {structure}")
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        # Save raw response for debugging
-        with open(f"realtime_{structure}.json", "w") as f:
-            json.dump(data, f, indent=2)
-        
-        # Parse the response based on actual structure
-        # The API returns an array of objects
-        if isinstance(data, list) and len(data) > 0:
-            for item in data:
-                # Look for discharge/flow data
-                # Common field names based on typical hydrology APIs
-                if "discharge" in item:
-                    flow_value = item["discharge"]
-                elif "flow" in item:
-                    flow_value = item["flow"]
-                elif "value" in item:
-                    flow_value = item["value"]
-                else:
-                    # Try to find any numeric value that could be flow
-                    for key, value in item.items():
-                        if isinstance(value, (int, float)) and key.lower() not in ["id", "timestamp", "date"]:
-                            flow_value = value
-                            break
-                    else:
-                        continue
-                
-                try:
-                    flow_float = float(flow_value)
-                    logger.info(f"Found flow for {structure}: {flow_float} cfs")
-                    return flow_float
-                except (ValueError, TypeError):
-                    continue
-        
-        logger.warning(f"No flow data found in realtime response for {structure}")
-        return None
-        
-    except Exception as e:
-        logger.error(f"Error getting realtime data for {structure}: {e}")
-        return None
-
-def get_flow_from_mdm(structure):
-    """
-    Get flow data from mdm endpoint (backup)
-    URL: https://sitedetailsreport.sfwmd.gov/mdm?site=S40
-    """
-    try:
-        url = f"{BASE_URL}/mdm"
-        params = {"site": structure}
-        
-        logger.debug(f"Fetching mdm data for {structure}")
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        # Save raw response for debugging
-        with open(f"mdm_{structure}.json", "w") as f:
-            json.dump(data, f, indent=2)
-        
-        # MDM endpoint might have different structure
-        # Look for flow/discharge data
-        if isinstance(data, dict):
-            # Check common field names
-            for field in ["discharge", "flow", "discharge_cfs", "flow_cfs", "value"]:
-                if field in data:
-                    try:
-                        flow_value = float(data[field])
-                        logger.info(f"Found flow in mdm for {structure}: {flow_value} cfs")
-                        return flow_value
-                    except (ValueError, TypeError):
-                        continue
-        
-        return None
-        
-    except Exception as e:
-        logger.error(f"Error getting mdm data for {structure}: {e}")
-        return None
-
 def get_flow(structure):
     """
-    Main function to get flow - tries realtime first, then mdm
+    Get flow data from the API
+    Returns: flow value in cfs or None if error
     """
-    # Try realtime endpoint first
-    flow = get_flow_from_realtime(structure)
-    
-    # If realtime fails, try mdm endpoint
-    if flow is None:
-        logger.info(f"Realtime failed for {structure}, trying mdm endpoint...")
-        flow = get_flow_from_mdm(structure)
-    
-    return flow
+    try:
+        params = API_PARAMS.copy()
+        params["sites"] = structure
+        
+        logger.debug(f"Fetching data for {structure}")
+        response = requests.get(API_URL, params=params, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        
+        # Save raw response for debugging (optional)
+        # with open(f"api_response_{structure}.json", "w") as f:
+        #     json.dump(data, f, indent=2)
+        
+        # Parse the response based on the structure you showed me
+        if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
+            time_series_list = data["timeSeriesResponse"]["timeSeries"]
+            
+            # Look for the FLOW time series
+            for time_series in time_series_list:
+                if ("parameter" in time_series and 
+                    "parameterName" in time_series["parameter"] and
+                    time_series["parameter"]["parameterName"] == "FLOW"):
+                    
+                    # Found the flow data
+                    if "values" in time_series and len(time_series["values"]) > 0:
+                        # Get the most recent value
+                        latest_value = time_series["values"][0]
+                        if "value" in latest_value:
+                            flow_value = latest_value["value"]
+                            
+                            # Check if it's valid (not the noDataValue)
+                            no_data_value = time_series["parameter"].get("noDataValue", -99999.0)
+                            if flow_value != no_data_value:
+                                logger.debug(f"Got flow for {structure}: {flow_value} cfs")
+                                return float(flow_value)
+        
+        logger.warning(f"No valid flow data found for {structure}")
+        return None
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"HTTP error fetching data for {structure}: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode error for {structure}: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching flow for {structure}: {e}")
+        return None
 
 def check_structures():
     """Check all structures for flow changes"""
@@ -248,7 +197,7 @@ def check_structures():
 
 def main():
     """Main monitoring function"""
-    logger.info("Starting spillway monitor with correct API endpoints...")
+    logger.info("Starting spillway monitor...")
     
     # Check if Pushover credentials are set
     if not os.environ.get("PUSHOVER_TOKEN") or not os.environ.get("PUSHOVER_USER"):
