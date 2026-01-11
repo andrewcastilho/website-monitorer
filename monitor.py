@@ -18,7 +18,7 @@ LOG_FILE = Path("logs/monitor.log")
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
 # CORRECT API endpoint from your cURL command
-API_URL = "https://sitestatus.api.sfwmd.gov/v1/sitestatus/realtime"
+API_URL = "https://my.sfwmd.gov/dbhydroplsql/web_io.report_process"
 
 # Headers from your cURL command
 HEADERS = {
@@ -106,68 +106,23 @@ def notify(structure, flow, delta=None):
         logger.error(f"Error sending notification: {e}")
         return False
 
-def get_flow(structure):
-    """
-    Get flow data from the correct API endpoint
-    Returns: flow value in cfs or None if error
-    """
-    try:
-        params = {
-            "format": "json",
-            "sites": structure,
-            "status": "A"
-        }
-        
-        logger.debug(f"Fetching data for {structure} from {API_URL}")
-        
-        response = requests.get(API_URL, params=params, headers=HEADERS, timeout=30)
-        
-        # Debug logging
-        logger.debug(f"Status: {response.status_code}, URL: {response.url}")
-        
-        if response.status_code != 200:
-            logger.error(f"API returned status {response.status_code} for {structure}")
-            return None
-        
-        try:
-            data = response.json()
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse JSON for {structure}: {e}")
-            logger.error(f"Response: {response.text[:200]}")
-            return None
-        
-        # Parse the response - based on the JSON structure you showed earlier
-        if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
-            time_series_list = data["timeSeriesResponse"]["timeSeries"]
-            
-            # Look for the FLOW time series
-            for time_series in time_series_list:
-                if ("parameter" in time_series and 
-                    "parameterName" in time_series["parameter"] and
-                    time_series["parameter"]["parameterName"] == "FLOW"):
-                    
-                    # Found the flow data
-                    if "values" in time_series and len(time_series["values"]) > 0:
-                        # Get the most recent value
-                        latest_value = time_series["values"][0]
-                        if "value" in latest_value:
-                            flow_value = latest_value["value"]
-                            
-                            # Check if it's valid (not the noDataValue)
-                            no_data_value = time_series["parameter"].get("noDataValue", -99999.0)
-                            if flow_value != no_data_value:
-                                logger.info(f"Got flow for {structure}: {flow_value} cfs")
-                                return float(flow_value)
-        
-        logger.warning(f"No valid flow data found for {structure}")
-        return None
-        
-    except requests.exceptions.RequestException as e:
-        logger.error(f"HTTP error fetching data for {structure}: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Error fetching flow for {structure}: {e}")
-        return None
+def get_gate_data(structure):
+    """Get gate opening data directly"""
+    form_data = {
+        "v_target_flag": "public",
+        "v_report_type": "format6",
+        "v_site_list": structure,
+        "v_datatype_list": "gate",  # Specifically request gate data
+        "v_begin_date": datetime.now().strftime("%Y-%m-%d"),
+        "v_end_date": datetime.now().strftime("%Y-%m-%d"),
+        "v_show_raw": "Y",
+        "v_show_summary": "N",
+        "v_show_approved": "Y",
+        "v_show_provisional": "Y"
+    }
+    
+    response = requests.post(API_URL, data=form_data, headers=HEADERS, timeout=30)
+    # Parse gate openings from response
 
 def check_structures():
     """Check all structures for flow changes"""
