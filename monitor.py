@@ -18,8 +18,7 @@ LOG_FILE = Path("logs/monitor.log")
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
 # CORRECT API endpoint from your cURL command
-API_URL = "https://my.sfwmd.gov/dbhydroplsql/web_io.report_process"
-
+API_URL = "https://sitedetailsreport.sfwmd.gov/dbhydroplsql/web_io.report_process"
 # Headers from your cURL command
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
