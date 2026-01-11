@@ -2,37 +2,95 @@ name: Spillway Monitor
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # every 10 minutes
-  workflow_dispatch:        # allows manual run
+    - cron: '*/10 * * * *'  # Every 10 minutes
+  workflow_dispatch:        # Manual trigger
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'spillway_monitor/**'
+      - '.github/workflows/spillway-monitor.yml'
+      - 'requirements.txt'
+
+env:
+  PYTHON_VERSION: '3.11'
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
+    
     steps:
-      # 1️⃣ Checkout your repository
-      - name: Checkout repo
+      # 1️⃣ Checkout repository with full history
+      - name: Checkout repository
         uses: actions/checkout@v3
-
-      # 2️⃣ Show repo structure (debugging)
-      - name: List repo files
-        run: ls -R
-
-      # 3️⃣ Set up Python
-      - name: Set up Python
+        with:
+          fetch-depth: 0  # Fetch all history for state comparison
+    
+      # 2️⃣ Set up Python with caching
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
-
-      # 4️⃣ Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'  # Enable pip caching
+    
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: |
-          pip install playwright requests
-          playwright install
-
-      # 5️⃣ Run your monitor script
-      - name: Run monitor
-        run: python monitor.py
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install requests
+    
+      # 4️⃣ Create necessary directories
+      - name: Create data and log directories
+        run: |
+          mkdir -p data logs
+    
+      # 5️⃣ Load previous state (if exists)
+      - name: Load previous state
+        uses: actions/cache@v3
+        with:
+          path: data
+          key: ${{ runner.os }}-spillway-state-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-spillway-state-
+    
+      # 6️⃣ Run the monitor script
+      - name: Run spillway monitor
+        run: |
+          python -m spillway_monitor.monitor
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
+          PYTHONPATH: ${{ github.workspace }}
+    
+      # 7️⃣ Save current state for next run
+      - name: Save monitoring state
+        uses: actions/cache@v3
+        with:
+          path: data
+          key: ${{ runner.os }}-spillway-state-${{ github.sha }}
+    
+      # 8️⃣ Upload logs as artifact (for debugging)
+      - name: Upload logs artifact
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: monitor-logs
+          path: |
+            logs/
+            data/
+          retention-days: 7
+    
+      # 9️⃣ Send notification on failure
+      - name: Notify on workflow failure
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            ❌ Spillway Monitor Workflow Failed!
+            Repository: ${{ github.repository }}
+            Run: ${{ github.run_id }}
+            Commit: ${{ github.sha }}
+            Workflow: ${{ github.workflow }}
