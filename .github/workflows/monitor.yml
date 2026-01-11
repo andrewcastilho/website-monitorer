@@ -29,16 +29,3 @@ jobs:
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
-      
-      - name: Upload API responses for debugging
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: api-debug-data
-          path: |
-            realtime_*.json
-            mdm_*.json
-            logs/
-            data/
-          retention-days: 7
-          if-no-files-found: ignore
