@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spillway Gate Monitor - Using correct SFWMD API endpoint
+Spillway Gate Monitor - Using WORKING SFWMD API endpoint
 """
 
 import requests
@@ -17,10 +17,10 @@ LOG_FILE = Path("logs/monitor.log")
 
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
-# CORRECT API endpoint from your cURL command
-API_URL = "https://sitedetailsreport.sfwmd.gov/dbhydroplsql/web_io.report_process"
+# WORKING API endpoint from your original cURL command
+API_URL = "https://my.sfwmd.gov/dbhydroplsql/web_io.report_process"
 
-# Headers from your cURL command
+# Headers from your WORKING cURL command
 HEADERS = {
     'accept': 'application/json, text/plain, */*',
     'accept-language': 'en-US,en;q=0.9',
@@ -108,16 +108,16 @@ def notify(structure, flow, delta=None):
 
 def get_flow(structure):
     """
-    Get flow data from the CORRECT DBHYDRO API endpoint
+    Get flow data from the WORKING DBHYDRO API endpoint
     Returns: flow value in cfs or None if error
     """
     try:
-        # CORRECT: POST request with form data
+        # EXACT form data from your working cURL command
         form_data = {
             "v_target_flag": "public",
             "v_report_type": "format6",
             "v_site_list": structure,
-            "v_datatype_list": "flow",  # Get flow data
+            "v_datatype_list": "flow",  # Changed from "gate" to get flow
             "v_begin_date": datetime.now().strftime("%Y-%m-%d"),
             "v_end_date": datetime.now().strftime("%Y-%m-%d"),
             "v_show_raw": "Y",
@@ -126,57 +126,79 @@ def get_flow(structure):
             "v_show_provisional": "Y"
         }
         
-        logger.debug(f"Fetching flow for {structure} from DBHYDRO API")
+        logger.debug(f"Fetching flow for {structure} from WORKING API")
         
-        # USE THE API_URL VARIABLE INSTEAD OF HARDCODED URL
+        # IMPORTANT: Use verify=False to bypass SSL certificate error
         response = requests.post(
-            API_URL,  # ← FIXED: Use the variable, not hardcoded URL
+            API_URL,
             data=form_data,
             headers=HEADERS,
             timeout=30,
-            verify=False  # ← ADD THIS to bypass SSL error for testing
+            verify=False  # ← THIS IS KEY for SSL bypass
         )
         
         # Debug logging
         logger.debug(f"Status: {response.status_code}")
+        logger.debug(f"URL: {response.url}")
         
         if response.status_code != 200:
             logger.error(f"API returned status {response.status_code} for {structure}")
+            logger.error(f"Response: {response.text[:200]}")
             return None
         
         # Parse the JSON response
         try:
             data = response.json()
+            logger.debug(f"Successfully parsed JSON for {structure}")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON for {structure}: {e}")
-            logger.error(f"Response sample: {response.text[:500]}")
+            logger.error(f"Response content type: {response.headers.get('content-type')}")
+            logger.error(f"Response first 500 chars: {response.text[:500]}")
             return None
         
-        # Navigate the JSON structure (same as before)
+        # Navigate the JSON structure - EXACTLY as in your JSON file
         if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
             time_series_list = data["timeSeriesResponse"]["timeSeries"]
             
-            # Look for FLOW parameter
+            logger.debug(f"Found {len(time_series_list)} time series for {structure}")
+            
+            # Look for FLOW parameter (checking multiple possibilities)
             for time_series in time_series_list:
                 param = time_series.get("parameter", {})
-                if param.get("parameterName") == "FLOW" and param.get("unit", {}).get("unitCode") == "cfs":
+                param_name = param.get("parameterName", "")
+                unit_code = param.get("unit", {}).get("unitCode", "")
+                
+                # Check for flow data (cfs)
+                if param_name == "FLOW" and unit_code == "cfs":
                     if "values" in time_series and len(time_series["values"]) > 0:
                         latest_value = time_series["values"][0]
                         if "value" in latest_value:
                             flow_value = latest_value["value"]
-                            # Get timestamp too for freshness check
-                            timestamp = latest_value.get("dateTime")
+                            timestamp = latest_value.get("dateTime", "No timestamp")
                             logger.info(f"Got flow for {structure}: {flow_value} cfs at {timestamp}")
                             return float(flow_value)
+                
+                # Also check for gate openings if flow not found
+                elif param_name == "GATE OPENING":
+                    if "values" in time_series and len(time_series["values"]) > 0:
+                        latest_value = time_series["values"][0]
+                        if "value" in latest_value:
+                            gate_value = latest_value["value"]
+                            logger.debug(f"Gate opening for {structure}: {gate_value} ft")
         
         logger.warning(f"No flow data found in response for {structure}")
+        # Log the available parameters for debugging
+        for i, ts in enumerate(time_series_list):
+            param = ts.get("parameter", {})
+            logger.debug(f"Series {i}: {param.get('parameterName')} ({param.get('unit', {}).get('unitCode')})")
+        
         return None
         
     except requests.exceptions.RequestException as e:
         logger.error(f"HTTP error fetching data for {structure}: {e}")
         return None
     except Exception as e:
-        logger.error(f"Error fetching flow for {structure}: {e}")
+        logger.error(f"Unexpected error fetching flow for {structure}: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return None
@@ -205,7 +227,7 @@ def check_structures():
                 if current > 0:
                     logger.info(f"Gate already open on first check: {structure}")
                     # Uncomment the line below to get alert for already open gates
-                    notify(structure, current, None)
+                    # notify(structure, current, None)
             
             else:  # Subsequent readings
                 logger.info(f"{structure}: {current} cfs (last: {last} cfs, delta: {current - last:.1f} cfs)")
@@ -230,12 +252,15 @@ def check_structures():
     
     if changes_detected:
         save_state(state)
+    else:
+        # Still save state even if no changes, to track values
+        save_state(state)
     
     return changes_detected
 
 def main():
     """Main monitoring function"""
-    logger.info("Starting spillway monitor with correct API...")
+    logger.info("Starting spillway monitor with WORKING API...")
     
     # Check if Pushover credentials are set
     if not os.environ.get("PUSHOVER_TOKEN") or not os.environ.get("PUSHOVER_USER"):
