@@ -5,7 +5,9 @@ import os
 STRUCTURES = ["S44", "S41", "S155", "S40"]
 STATE_FILE = "last_values.json"
 
-DBHYDRO_URL = "https://api.dbhydro.sfwmd.gov/v1/data"
+SURGE_THRESHOLD = 500  # cfs increase that counts as a surge
+
+DBHYDRO_URL = "https://www.sfwmd.gov/dbhydroplsql/web_io.report_process"
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -17,23 +19,26 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f)
 
-def notify(structure, flow):
+def notify(structure, flow, change=None):
+    msg = f"🚨 {structure} FLOW ALERT\nFlow: {flow} cfs"
+    if change:
+        msg += f"\nIncrease: +{change} cfs"
+
     requests.post(
         "https://api.pushover.net/1/messages.json",
         data={
             "token": os.environ["PUSHOVER_TOKEN"],
             "user": os.environ["PUSHOVER_USER"],
-            "message": f"🚨 {structure} FLOW DETECTED\nFlow: {flow} cfs"
+            "message": msg
         }
     )
 
 def get_flow_value(structure):
     params = {
-        "site_id": structure,
-        "parameter": "DISCHARGE",
-        "format": "json",
-        "limit": 1,
-        "order": "desc"
+        "v_report_type": "format=json",
+        "v_station": structure,
+        "v_param": "DISCHARGE",
+        "v_num_records": 1
     }
 
     r = requests.get(DBHYDRO_URL, params=params, timeout=30)
@@ -41,10 +46,10 @@ def get_flow_value(structure):
 
     data = r.json()
 
-    if not data or "value" not in data[0]:
+    if not data or "data" not in data or not data["data"]:
         raise Exception("No flow data returned")
 
-    return float(data[0]["value"])
+    return float(data["data"][0]["value"])
 
 def main():
     state = load_state()
@@ -56,9 +61,13 @@ def main():
 
             print(f"{structure}: {current} cfs (last: {last})")
 
-            # Notify on 0 → >0 transition
+            # 0 → >0 (initial opening)
             if current > 0 and last == 0:
                 notify(structure, current)
+
+            # Surge detection
+            elif current - last >= SURGE_THRESHOLD:
+                notify(structure, current, change=current - last)
 
             state[structure] = current
 
@@ -69,3 +78,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
