@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spillway Gate Monitor - Using correct SFWMD API
+Spillway Gate Monitor - Using correct SFWMD API with proper headers
 """
 
 import requests
@@ -17,11 +17,16 @@ LOG_FILE = Path("logs/monitor.log")
 
 SURGE_THRESHOLD = 500  # cfs jump that counts as a surge
 
-# API endpoint from your discovery
+# API endpoint
 API_URL = "https://sitedetailsreport.sfwmd.gov/realtime"
-API_PARAMS = {
-    "format": "json",
-    "status": "A"
+
+# Browser-like headers to get JSON instead of HTML
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
 }
 
 # Setup logging
@@ -96,24 +101,51 @@ def notify(structure, flow, delta=None):
 
 def get_flow(structure):
     """
-    Get flow data from the API
+    Get flow data from the API with proper headers
     Returns: flow value in cfs or None if error
     """
     try:
-        params = API_PARAMS.copy()
-        params["sites"] = structure
+        params = {
+            "format": "json",
+            "sites": structure,
+            "status": "A"
+        }
         
         logger.debug(f"Fetching data for {structure}")
-        response = requests.get(API_URL, params=params, timeout=30)
-        response.raise_for_status()
         
-        data = response.json()
+        # Try with session first
+        session = requests.Session()
+        session.headers.update(HEADERS)
         
-        # Save raw response for debugging (optional)
-        # with open(f"api_response_{structure}.json", "w") as f:
-        #     json.dump(data, f, indent=2)
+        # Make initial request to get cookies if needed
+        session.get("https://sitedetailsreport.sfwmd.gov/", timeout=10)
         
-        # Parse the response based on the structure you showed me
+        response = session.get(API_URL, params=params, timeout=30)
+        
+        # Debug: Save response to see what we're getting
+        debug_file = f"debug_{structure}_response.txt"
+        with open(debug_file, "w", encoding="utf-8") as f:
+            f.write(f"Status: {response.status_code}\n")
+            f.write(f"URL: {response.url}\n")
+            f.write(f"Headers: {dict(response.headers)}\n")
+            f.write(f"Response (first 500 chars):\n{response.text[:500]}\n")
+        
+        logger.debug(f"Status: {response.status_code}, Content-Type: {response.headers.get('content-type')}")
+        
+        if response.status_code != 200:
+            logger.error(f"API returned status {response.status_code} for {structure}")
+            logger.error(f"Response: {response.text[:200]}")
+            return None
+        
+        # Try to parse JSON
+        try:
+            data = response.json()
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON for {structure}: {e}")
+            logger.error(f"Response text: {response.text[:200]}")
+            return None
+        
+        # Parse the response
         if "timeSeriesResponse" in data and "timeSeries" in data["timeSeriesResponse"]:
             time_series_list = data["timeSeriesResponse"]["timeSeries"]
             
@@ -133,7 +165,7 @@ def get_flow(structure):
                             # Check if it's valid (not the noDataValue)
                             no_data_value = time_series["parameter"].get("noDataValue", -99999.0)
                             if flow_value != no_data_value:
-                                logger.debug(f"Got flow for {structure}: {flow_value} cfs")
+                                logger.info(f"Got flow for {structure}: {flow_value} cfs")
                                 return float(flow_value)
         
         logger.warning(f"No valid flow data found for {structure}")
@@ -142,12 +174,56 @@ def get_flow(structure):
     except requests.exceptions.RequestException as e:
         logger.error(f"HTTP error fetching data for {structure}: {e}")
         return None
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error for {structure}: {e}")
-        return None
     except Exception as e:
         logger.error(f"Error fetching flow for {structure}: {e}")
         return None
+
+def get_flow_simple(structure):
+    """Simpler version for testing"""
+    try:
+        params = {
+            "format": "json",
+            "sites": structure,
+            "status": "A"
+        }
+        
+        # Simple request
+        response = requests.get(API_URL, params=params, headers=HEADERS, timeout=10)
+        
+        print(f"\nTesting {structure}:")
+        print(f"Status: {response.status_code}")
+        print(f"URL: {response.url}")
+        print(f"Content-Type: {response.headers.get('content-type')}")
+        
+        if response.status_code == 200:
+            print(f"Response preview: {response.text[:200]}")
+            
+            # Check if it looks like JSON
+            text = response.text.strip()
+            if text.startswith('{') or text.startswith('['):
+                try:
+                    data = json.loads(text)
+                    print("✓ Valid JSON!")
+                    
+                    # Save for inspection
+                    with open(f"test_{structure}.json", "w") as f:
+                        json.dump(data, f, indent=2)
+                    print(f"Saved to test_{structure}.json")
+                    
+                except json.JSONDecodeError as e:
+                    print(f"✗ JSON decode error: {e}")
+            else:
+                print("✗ Not JSON")
+                # Save as text
+                with open(f"test_{structure}.txt", "w") as f:
+                    f.write(response.text)
+        else:
+            print(f"✗ Error: {response.text[:100]}")
+            
+    except Exception as e:
+        print(f"✗ Exception: {e}")
+    
+    return None
 
 def check_structures():
     """Check all structures for flow changes"""
@@ -195,6 +271,15 @@ def check_structures():
     
     return changes_detected
 
+def test_all_structures():
+    """Test all structures to see what the API returns"""
+    print("Testing API for all structures...")
+    print("=" * 60)
+    
+    for structure in STRUCTURES:
+        get_flow_simple(structure)
+        print("-" * 40)
+
 def main():
     """Main monitoring function"""
     logger.info("Starting spillway monitor...")
@@ -204,6 +289,10 @@ def main():
         logger.warning("Pushover credentials not found in environment")
         logger.warning("Notifications will not be sent")
     
+    # First test to see what we get
+    test_all_structures()
+    
+    # Then run actual monitoring
     check_structures()
     logger.info("Check completed")
 
