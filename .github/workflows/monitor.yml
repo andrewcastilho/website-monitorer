@@ -1,28 +1,30 @@
-name: S44 Gate Monitor
+name: Spillway Monitor
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch:
+    - cron: '*/10 * * * *'  # every 10 minutes
+  workflow_dispatch:        # optional: allows manual runs
 
 jobs:
-  check:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
       - name: Install dependencies
         run: |
           pip install playwright requests
-          playwright install chromium
+          playwright install
 
       - name: Run monitor
-        run: python monitor.py
+        run: python spillway_monitor.py
         env:
           PUSHOVER_TOKEN: ${{ secrets.PUSHOVER_TOKEN }}
           PUSHOVER_USER: ${{ secrets.PUSHOVER_USER }}
